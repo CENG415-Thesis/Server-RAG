@@ -1,0 +1,2 @@
+#logger module for logging
+# LOG YAPISI HAZIR, YAŞAR İLE BERABER BU MODÜL TAMAMLANACAK
