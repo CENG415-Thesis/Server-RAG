@@ -28,6 +28,7 @@ def save_uploaded_file(pdf_file, embed_method, db_name="vector-db", uploaded_fil
     pdf_open = pymupdf.open(save_path)
     toc = pdf_open.get_toc()
     chunked_documents = []
+    pdf_metadata = pdf_open.metadata
 
     # Eğer TOC yoksa, tüm dokümanı tek parça olarak işle
     if not toc:
@@ -56,10 +57,13 @@ def save_uploaded_file(pdf_file, embed_method, db_name="vector-db", uploaded_fil
             for page_num in range(start_page, end_page):
                 chunk_text += pdf_open[page_num].get_text()
             
+
+            dynamic_metadata = {key: value for key, value in pdf_metadata.items() if value}
+
             chunked_documents.append(
                 Document(
                     page_content=chunk_text,
-                    metadata={"heading": heading, "start_page": start_page, "end_page": end_page}
+                    metadata={"heading": heading, "start_page": start_page, "end_page": end_page, **dynamic_metadata}
                 )
             )
 
@@ -71,5 +75,5 @@ def save_uploaded_file(pdf_file, embed_method, db_name="vector-db", uploaded_fil
     vectorstore = Chroma(persist_directory=db_name, embedding_function=embed_method)
     vectorstore.add_documents(documents=final_chunks)
     vectorstore.persist()
-
+    pdf_open.close()
     return f"{pdf_file.name} başarıyla vektör veritabanına eklendi!"
