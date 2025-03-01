@@ -1,8 +1,8 @@
 from modules.agent_state import AgentState
 from helpers.config import embeddings, vectorstore, retriever, llm, memory
 from langchain_community.llms import Ollama
-import helpers.logger
-import helpers.grader
+from helpers.logger import log_event
+from helpers.grader import Grader
 
 THRESHOLD_SCORE = 0.7
 
@@ -34,7 +34,7 @@ class ModelHandler:
         # Güvenlik kontrolü: Yanlış cevap dönerse default olarak telecom seç
         if category not in self.models:
             category = "telecom"
-            helpers.logger.log_event("INFO", f"Classified query: {query} as category: {category}")
+            log_event("INFO", f"Classified query: {query} as category: {category}")
         return category
 
 
@@ -42,14 +42,14 @@ class ModelHandler:
     def get_model(self, query: str):
         """Choose the best model based on LLM classification of the query."""
         category = self.classify_query(query)
-        helpers.logger.log_event("INFO", f"Selected model for category {category}")
+        log_event("INFO", f"Selected model for category {category}")
         return self.models[category]
 
 
 class Nodes:
     @staticmethod
     def user_input_node(state: AgentState):
-        helpers.logger.log_event("INFO", f"User input node started with state: {state}")
+        log_event("INFO", f"User input node started with state: {state}")
         # query alır
         #helpers.logger.log_event("INFO", f"User query received: {state["user_query"]}")
         return {"user_query": state["user_query"]}
@@ -58,7 +58,7 @@ class Nodes:
     def retrieve_node(state: AgentState):
         # vector dbden alakalıları çekterim
         retrieved_docs = vectorstore.similarity_search(state["user_query"], k=10)
-        helpers.logger.log_event("INFO", f"Retrieved {len(retrieved_docs)} documents")
+        log_event("INFO", f"Retrieved {len(retrieved_docs)} documents")
         return {"retrieved_docs": [doc.page_content for doc in retrieved_docs]}
 
     @staticmethod
@@ -87,24 +87,23 @@ class Nodes:
         """
         try:
             response = model.invoke(prompt)
-            helpers.logger.log_event("INFO", f"Query: {state['user_query']} | Response: {response}")
+            log_event("INFO", f"Query: {state['user_query']} | Response: {response}")
             return {"response": response}
         except Exception as e:
-            helpers.logger.log_event("ERROR", f"Error while generating: {str(e)}")
+            log_event("ERROR", f"Error while generating: {str(e)}")
             return {"error":  "Response not generated"}
-
 
     
     @staticmethod
     def evaluate_response_node(state: AgentState):
-        grader = helpers.grader.Grader()
-        helpers.logger.log_event("INFO", f"Evaluating response for query: {state['user_query']}")
+        grader = Grader()
+        log_event("INFO", f"Evaluating response for query: {state['user_query']}")
         evaluation_result = grader.grade(
             context="\n".join(state["retrieved_docs"]),
             question=state["user_query"],
             response=state["response"])
 
-        helpers.logger.log_event("INFO", f"Evaluation result: {evaluation_result}")
+        log_event("INFO", f"Evaluation result: {evaluation_result}")
         print("Grader Output:", evaluation_result)  # Debug için çıktıyı yazdır
     
         scores = {"Groundedness": 0.0, "Answer Relevance": 0.0, "Context Relevance": 0.0}
@@ -120,21 +119,40 @@ class Nodes:
                         continue
     
         final_score = sum(scores.values()) / len(scores)  # Üç kriterin ortalamasını al
-        helpers.logger.log_event("INFO", f"Final evaluation score: {final_score}")
-        return {"evaluation_score": final_score}
+        log_event("INFO", f"Final evaluation score: {final_score}")
+        return {"grader_score": final_score}
 
     @staticmethod
     def revise_response_node(state: AgentState):
-        if state["evaluation_score"] < THRESHOLD_SCORE:
-            helpers.logger.log_event("INFO", f"Revizing response due to low score: {state['evaluation_score']}")
-            print("Revizing response due to low score:", state["evaluation_score"])  # Debug için
-            return {"response": Nodes.generate_response_node(state)["response"]}
-        return {}
+        log_event("INFO", f"Revising response for query: {state['user_query']}")
+    
+        model_handler = ModelHandler()
+        model = model_handler.get_model(state["user_query"])
+        
+        prompt = f"""
+        You are improving an telecom assistant's response based on evaluation feedback. Consider the retrieved context and previous response. 
+        Improve clarity, completeness, and relevance to the user's question.
 
+        - User Query: {state['user_query']}
+        - Retrieved Context: {" ".join(state["retrieved_docs"])}
+        - Previous Response: {state['response']}
+        - Evaluation Feedback: {state['grader_score']} (low score means response needs significant improvement)
+        
+        Please provide an improved version of the response.
+        """
+
+        try:
+            revised_response = model.invoke(prompt)
+            log_event("INFO", f"Revised response generated.")
+            return {"response": revised_response, "revision_number": state["revision_number"] + 1}
+        except Exception as e:
+            log_event("ERROR", f"Error in revising response: {str(e)}")
+            return {"error": "Failed to revise response"}
+            
     @staticmethod
     def update_memory_node(state: AgentState):
-        helpers.logger.log_event("INFO", f"Saving memory for query: {state['user_query']} and response: {state['response']}")
+        log_event("INFO", f"Saving memory for query: {state['user_query']} and response: {state['response']}")
         memory.save_context({"input": state["user_query"]}, {"output": state["response"]})
-        helpers.logger.log_event("INFO", f"Updated memory. Current chat history: {memory.load_memory_variables({}).get('history')}")
+        log_event("INFO", f"Updated memory. Current chat history: {memory.load_memory_variables({}).get('history')}")
         return {"chat_history": memory.load_memory_variables({}).get("history", "")}
 
