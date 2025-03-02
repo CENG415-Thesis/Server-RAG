@@ -10,7 +10,7 @@ from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
 
 # PDF dosyasını yükleme
-pdf_folders_path =glob.glob("../knowledge_base/*")
+pdf_folders_path =glob.glob("../../knowledge_base/*")
 text_loader_kwargs = {'encoding': 'utf-8'}
 print(pdf_folders_path)
 
@@ -29,11 +29,18 @@ for pdf_folder in pdf_folders_path:
 
 
     for pdf_path in pdf_files:
+
+        #PDF filename
+        pdf_filename = os.path.basename(pdf_path)
+        
         # PDF dosyasını aç
         pdf_open = pymupdf.open(pdf_path)
         
         # Table of Contents (TOC) al
         toc = pdf_open.get_toc()
+
+        # PyMuPDF metadata'yı al
+        pdf_metadata = pdf_open.metadata
 
         for i, item in enumerate(toc):
             heading = item[1]
@@ -55,11 +62,13 @@ for pdf_folder in pdf_folders_path:
             for page_num in range(start_page, end_page):  # PyMuPDF için 0-index
                 chunk_text += pdf_open[page_num].get_text()
 
+            dynamic_metadata = {key: value for key, value in pdf_metadata.items() if value}
+            
         # İlk chunk'ları oluştur ve listeye ekle
             chunked_documents.append(
                 Document(
                     page_content=chunk_text,
-                    metadata={"heading": heading, "start_page": start_page, "end_page": end_page}
+                    metadata={"heading": heading, "start_page": start_page, "end_page": end_page,**dynamic_metadata}
                 )
             )
             

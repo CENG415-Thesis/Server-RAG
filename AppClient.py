@@ -1,4 +1,3 @@
-# graph ile beraber CLIENT için yeni yapı kurulacak 
 import gradio as gr
 from langgraph.graph import StateGraph, END
 from modules.agent_state import AgentState

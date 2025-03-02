@@ -1,75 +1,114 @@
-#bazı modüller eksik kaldı
 import os
-import pymupdf
-from langchain.schema import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_chroma import Chroma
+import warnings
+import shutil
+import hashlib
+from datetime import datetime
+from helpers.constants import UPLOADED_FILES_DIR, HASH_FILE_PATH
+from helpers.config import vectorstore
 
-def save_uploaded_file(pdf_file, embed_method, db_name="vector-db", uploaded_files_dir="uploaded_files"):
-    """
-    Yüklenen PDF dosyasını belirtilen klasöre kaydeder, metni işler ve vektör veritabanına ekler.
+os.makedirs(UPLOADED_FILES_DIR, exist_ok=True)
+
+
+# Helper functions for loading and saving file hashes
+def get_file_hash(file_path):
+    """Calculate MD5 hash of a file to identify duplicates"""
+    hash_md5 = hashlib.md5()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
+
+def load_existing_hashes():
+    """Load existing file hashes from storage"""
+    if not os.path.exists(HASH_FILE_PATH):
+        return {}
     
-    :param pdf_file: Gradio tarafından döndürülen NamedString nesnesi (pdf_file.name içinden yol alınır)
-    :param embed_method: Seçilen embedding yöntemi
-    :param db_name: Vektör veritabanının adı (varsayılan: "vector-db")
-    :param uploaded_files_dir: Kaydedilecek ana dizin (varsayılan: "uploaded_files")
-    """
-    # PDF'in kaydedileceği klasörü oluştur
-    os.makedirs(uploaded_files_dir, exist_ok=True)
-    save_path = os.path.join(uploaded_files_dir, os.path.basename(pdf_file.name))  # Güvenli isimlendirme
+    file_hashes = {}
+    try:
+        with open(HASH_FILE_PATH, "r") as f:
+            for line in f:
+                if ":" in line:
+                    hash_value, filename = line.strip().split(":", 1)
+                    file_hashes[hash_value] = filename
+    except Exception:
+        # If there's an error reading the file, start fresh
+        file_hashes = {}
     
-    # PDF dosyasını kaydet
-    with open(save_path, "wb") as f:
-        f.write(pdf_file.getvalue())  # Gradio dosya nesnesi için doğru yöntem
+    return file_hashes
 
-    print(f"{pdf_file.name} başarıyla kaydedildi!")
+def save_file_hash(file_hash, filename):
+    """Save a new file hash to storage"""
+    with open(HASH_FILE_PATH, "a+") as f:
+        f.write(f"{file_hash}:{filename}\n")
+        
+ 
+def save_uploaded_files(files):
+    """Save uploaded files to the designated directory and return their paths"""
+    saved_paths = []
+    duplicate_files = []
+    existing_hashes = load_existing_hashes()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    for i, file in enumerate(files):
+        # Calculate file hash to check for duplicates
+        file_hash = get_file_hash(file.name)
+        
+        # Check if this file has been uploaded before
+        if file_hash in existing_hashes:
+            duplicate_files.append(os.path.basename(file.name))
+            continue
+        
+        # Create a unique filename with timestamp
+        original_filename = os.path.basename(file.name)
+        filename_without_ext, extension = os.path.splitext(original_filename)
+        new_filename = f"{filename_without_ext}_{timestamp}_{i}{extension}"
+        
+        # Define the save path
+        save_path = os.path.join(UPLOADED_FILES_DIR, new_filename)
+        
+        # Copy the file to the uploads directory
+        shutil.copy2(file.name, save_path)
+        saved_paths.append(save_path)
+        
+        # Save the hash to prevent future duplicates
+        save_file_hash(file_hash, new_filename)
+    
+    return saved_paths, duplicate_files
 
-    # PDF dosyasını aç
-    pdf_open = pymupdf.open(save_path)
-    toc = pdf_open.get_toc()
-    chunked_documents = []
-
-    # Eğer TOC yoksa, tüm dokümanı tek parça olarak işle
-    if not toc:
-        chunk_text = ""
-        for page_num in range(pdf_open.page_count):
-            chunk_text += pdf_open[page_num].get_text()
-
-        chunked_documents.append(
-            Document(
-                page_content=chunk_text,
-                metadata={"heading": "Full Document", "start_page": 0, "end_page": pdf_open.page_count}
-            )
-        )
-    else:
-        # TOC kullanarak bölümlere ayır
-        for i, item in enumerate(toc):
-            heading = item[1]
-            start_page = item[2]
+def list_uploaded_files():
+    """List all previously uploaded PDF files with metadata"""
+    if not os.path.exists(UPLOADED_FILES_DIR):
+        return {"data": [], "headers": ["Filename", "Size (KB)", "Upload Date"]}
+    
+    files_data = []
+    for filename in os.listdir(UPLOADED_FILES_DIR):
+        if filename.lower().endswith('.pdf'):
+            file_path = os.path.join(UPLOADED_FILES_DIR, filename)
+            # Get file stats
+            file_stats = os.stat(file_path)
+            size_kb = file_stats.st_size / 1024
+            upload_date = datetime.fromtimestamp(file_stats.st_mtime).strftime("%Y-%m-%d %H:%M")
             
-            if i + 1 < len(toc):
-                end_page = toc[i + 1][2] - 1
-            else:
-                end_page = pdf_open.page_count - 1  # Son başlıksa son sayfaya kadar
-            
-            chunk_text = ""
-            for page_num in range(start_page, end_page):
-                chunk_text += pdf_open[page_num].get_text()
-            
-            chunked_documents.append(
-                Document(
-                    page_content=chunk_text,
-                    metadata={"heading": heading, "start_page": start_page, "end_page": end_page}
-                )
-            )
+            # Add as a list (row) instead of a dictionary
+            files_data.append([filename, f"{size_kb:.1f}", upload_date])
+    
+    # Sort by upload date (newest first)
+    files_data.sort(key=lambda x: x[2], reverse=True)
+    
+    return {"data": files_data, "headers": ["Filename", "Size (KB)", "Upload Date"]}
 
-    # Chunking işlemi (Bölme)
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    final_chunks = text_splitter.split_documents(chunked_documents)
-
-    # Vektör veritabanını güncelle
-    vectorstore = Chroma(persist_directory=db_name, embedding_function=embed_method)
-    vectorstore.add_documents(documents=final_chunks)
+def remove_pdf_from_vectorstore(pdf_filename: str):
+    all_docs = vectorstore.get()
+    
+    # Silinecek belgeleri filtreleme
+    doc_ids_to_remove = [doc["id"] for doc in all_docs["documents"] if doc["metadata"].get("source") == pdf_filename]
+    
+    if not doc_ids_to_remove:
+        print(f"⚠️ {pdf_filename} not found in vectorstore.")
+        return
+    
+    vectorstore.delete(doc_ids_to_remove)
     vectorstore.persist()
+    
+    print(f"❌ {pdf_filename} removed successfully!")
 
-    return f"{pdf_file.name} başarıyla vektör veritabanına eklendi!"
