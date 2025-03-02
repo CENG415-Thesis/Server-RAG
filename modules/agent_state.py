@@ -6,4 +6,6 @@ class AgentState(TypedDict):
     retrieved_docs: List[str]
     response: str
     chat_history: str
-    #yeni eklenen STATE'ler eklenecek
+    revision_number: int
+    max_revisions: int
+    grader_score: float    

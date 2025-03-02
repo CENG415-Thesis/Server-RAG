@@ -2,7 +2,7 @@
 
 import glob
 from langchain_community.document_loaders import PyMuPDFLoader,DirectoryLoader
-from langchain.text_splitter import CharacterTextSplitter,RecursiveCharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 import pymupdf
 import os
