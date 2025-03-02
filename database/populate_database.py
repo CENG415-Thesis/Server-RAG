@@ -68,7 +68,7 @@ for pdf_folder in pdf_folders_path:
             chunked_documents.append(
                 Document(
                     page_content=chunk_text,
-                    metadata={"heading": heading, "start_page": start_page, "end_page": end_page,**dynamic_metadata}
+                    metadata={"source": pdf_filename ,"heading": heading, "start_page": start_page, "end_page": end_page,**dynamic_metadata}
                 )
             )
             
@@ -85,7 +85,7 @@ embeddings = OllamaEmbeddings(
 )
 
 
-db_name = "vector-db"
+db_name = "../vector-db"
 
 
 
