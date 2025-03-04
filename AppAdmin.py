@@ -128,7 +128,7 @@ with gr.Blocks(title="IZTECH Telecom RAG Server 🤖", theme=gr.themes.Soft()) a
                     label="Upload PDF Files"
                 )
             collection_num =get_collection_count()
-            gr.Textbox(f"Total documents in vector store: {collection_num}", interactive=True)
+            gr.Textbox(f"Total chunks in vector store: {collection_num}", interactive=False, label="Total Chunk")
                 
             with gr.Row():
                 process_btn = gr.Button("ADD to Vector DB")
