@@ -18,6 +18,8 @@ def log_event(event_type: str, message: str):
         logging.error(message)
     elif event_type == "WARNING":
         logging.warning(message)
+    elif event_type == "ADMIN":
+        logging.critical(message)
     else:
         logging.debug(message)  # Varsayılan olarak debug seviyesinde log tut
 
