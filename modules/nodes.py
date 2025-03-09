@@ -2,7 +2,7 @@ from modules.agent_state import AgentState
 from helpers.config import embeddings, vectorstore, retriever, llm, memory
 from langchain_community.llms import Ollama
 from helpers.logger import log_event
-from helpers.grader import Grader
+from helpers.grader import get_context_relevance, get_hallucination_score ,llm_json_mode
 
 THRESHOLD_SCORE = 0.7
 
@@ -51,15 +51,18 @@ class Nodes:
     def user_input_node(state: AgentState):
         log_event("INFO", f"User input node started with state: {state}")
         # query alır
-        #helpers.logger.log_event("INFO", f"User query received: {state["user_query"]}")
+       # log_event("INFO", f"User query received: {state["user_query"]}")
         return {"user_query": state["user_query"]}
 
     @staticmethod
     def retrieve_node(state: AgentState):
         # vector dbden alakalıları çekterim
-        retrieved_docs = vectorstore.similarity_search(state["user_query"], k=10)
+        retrieved_docs = vectorstore.similarity_search(state["user_query"],k=5)
         log_event("INFO", f"Retrieved {len(retrieved_docs)} documents")
-        return {"retrieved_docs": [doc.page_content for doc in retrieved_docs]}
+        docs_txt = ""
+        for doc in retrieved_docs:
+            docs_txt += doc.page_content
+        return {"retrieved_docs":[docs_txt]}
 
     @staticmethod
     def generate_response_node(state: AgentState):
@@ -72,10 +75,9 @@ class Nodes:
         chat_history = memory.load_memory_variables({}).get("history", "")
         
         # cevabı generate ettiririm
-        combined_context = "\n".join(state["retrieved_docs"])
+        combined_context = "\n".join(state["retrieved_docs"][0])
         prompt = f"""
-        You are a telecom assistant. Your answers should be based on the context and chat history provided. If the context is not relevant to the user's query, politely state that you do not have the required information. \
-        If there is no chat history, simply say, "Hello, how can I help you?"
+        You are a telecom assistant. Your answers should be based on the context and chat history provided. If the context is not relevant to the user's query, politely state that you do not have the required information."
 
         Chat History: {chat_history}    
         
@@ -96,29 +98,14 @@ class Nodes:
     
     @staticmethod
     def evaluate_response_node(state: AgentState):
-        grader = Grader()
         log_event("INFO", f"Evaluating response for query: {state['user_query']}")
-        evaluation_result = grader.grade(
-            context="\n".join(state["retrieved_docs"]),
-            question=state["user_query"],
-            response=state["response"])
-
+        hallucination_result = get_hallucination_score(state["retrieved_docs"], state["response"], llm_json_mode=llm_json_mode)
+        context_relevance_result = get_context_relevance(state["user_query"],state["retrieved_docs"])
+        evaluation_result = {**hallucination_result, **context_relevance_result}
         log_event("INFO", f"Evaluation result: {evaluation_result}")
         print("Grader Output:", evaluation_result)  # Debug için çıktıyı yazdır
     
-        scores = {"Groundedness": 0.0, "Answer Relevance": 0.0, "Context Relevance": 0.0}
-    
-        score_lines = evaluation_result.split("\n")
-        for line in score_lines:
-            for key in scores.keys():
-                if key in line:
-                    try:
-                        score = float(line.split(":")[1].strip().replace('*', ''))
-                        scores[key] = score
-                    except (IndexError, ValueError):
-                        continue
-    
-        final_score = sum(scores.values()) / len(scores)  # Üç kriterin ortalamasını al
+        final_score = (context_relevance_result.get("relevance_score",0.0) + hallucination_result.get("hallucination_score",0.0)) / 2  # Üç kriterin ortalamasını al
         log_event("INFO", f"Final evaluation score: {final_score}")
         return {"grader_score": final_score}
 
@@ -128,15 +115,19 @@ class Nodes:
     
         model_handler = ModelHandler()
         model = model_handler.get_model(state["user_query"])
-        
+
+        hallucination_result = get_hallucination_score(state["retrieved_docs"], state["response"], llm_json_mode=llm_json_mode)
+        context_relevance_result = get_context_relevance(state["user_query"],state["retrieved_docs"])
+        evaluation_result = {**hallucination_result, **context_relevance_result}
+        context_relevance_result.get("explanation_context_relevance", "")
         prompt = f"""
         You are improving an telecom assistant's response based on evaluation feedback. Consider the retrieved context and previous response. 
         Improve clarity, completeness, and relevance to the user's question.
 
         - User Query: {state['user_query']}
-        - Retrieved Context: {" ".join(state["retrieved_docs"])}
+        - Retrieved Context: {" ".join(state["retrieved_docs"][0])}
         - Previous Response: {state['response']}
-        - Evaluation Feedback: {state['grader_score']} (low score means response needs significant improvement)
+        - Evaluation Feedback: {evaluation_result} (low score means response needs significant improvement)
         
         Please provide an improved version of the response.
         """
@@ -156,3 +147,4 @@ class Nodes:
         log_event("INFO", f"Updated memory. Current chat history: {memory.load_memory_variables({}).get('history')}")
         return {"chat_history": memory.load_memory_variables({}).get("history", "")}
 
+ 
