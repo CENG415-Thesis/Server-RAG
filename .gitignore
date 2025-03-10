@@ -1,2 +1,6 @@
 vector-db/
-uploaded_files/
+uploaded_files_admin/
+.gradio/
+.ipynb_checkpoints/
+__pycache__/
+.virtual_documents/
