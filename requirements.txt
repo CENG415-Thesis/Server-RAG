@@ -1,0 +1,7 @@
+langchain
+langchain-chroma
+langchain-ollama
+langchain-community
+langgraph
+pymupdf
+gradio
